@@ -129,9 +129,89 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
+typedef struct {
+    uint32_t mode;
+    ObjectID hash;
+    char path[1024];
+} TempEntry;
+
+static int build_recursive(TempEntry *entries, int start, int end, int path_offset, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+
+    int i = start;
+    while (i < end) {
+        const char *rel_path = entries[i].path + path_offset;
+        char *slash = strchr(rel_path, '/');
+
+        if (!slash) {
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = entries[i].mode;
+            te->hash = entries[i].hash;
+            strcpy(te->name, rel_path);
+            i++;
+        } else {
+            int dir_name_len = slash - rel_path;
+            char dir_name[256];
+            strncpy(dir_name, rel_path, dir_name_len);
+            dir_name[dir_name_len] = '\0';
+
+            int j = i;
+            while (j < end) {
+                const char *sub_path = entries[j].path + path_offset;
+                if (strncmp(sub_path, dir_name, dir_name_len) != 0 || sub_path[dir_name_len] != '/') {
+                    break;
+                }
+                j++;
+            }
+
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = MODE_DIR;
+            strcpy(te->name, dir_name);
+
+            build_recursive(entries, i, j, path_offset + dir_name_len + 1, &te->hash);
+            i = j;
+        }
+    }
+
+    void *data;
+    size_t len;
+    tree_serialize(&tree, &data, &len);
+    object_write(OBJ_TREE, data, len, id_out);
+    free(data);
+    return 0;
+}
+
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    FILE *f = fopen(".pes/index", "r");
+    if (!f) {
+        Tree empty;
+        empty.count = 0;
+        void *data;
+        size_t len;
+        tree_serialize(&empty, &data, &len);
+        object_write(OBJ_TREE, data, len, id_out);
+        free(data);
+        return 0;
+    }
+
+    TempEntry *entries = malloc(sizeof(TempEntry) * 1024);
+    int count = 0;
+    char line[2048];
+    while (fgets(line, sizeof(line), f) && count < 1024) {
+        char hash_hex[65];
+        long mtime;
+        size_t size;
+        if (sscanf(line, "%o %64s %ld %zu %1023s", &entries[count].mode, hash_hex, &mtime, &size, entries[count].path) == 5) {
+            hex_to_hash(hash_hex, &entries[count].hash);
+            count++;
+        }
+    }
+    fclose(f);
+
+    int result = build_recursive(entries, 0, count, 0, id_out);
+    free(entries);
+    return result;
 }
