@@ -40,7 +40,8 @@
 ![Screenshot 4C](./images/4C.jpeg)
 
 **Screenshot Final: Full Integration Test**
-![Integration Test](./images/final.jpeg)
+![Integration Test](./images/final1.jpeg)
+![Integration Test](./images/final2.jpeg)
 
 ---
 
